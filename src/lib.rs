@@ -117,6 +117,27 @@ pub fn is_image(path: &Path) -> bool {
         })
 }
 
+pub fn embedded_jpeg(bytes: &[u8]) -> Option<&[u8]> {
+    let mut largest = None;
+    let mut offset = 0;
+    while let Some(start) = bytes[offset..]
+        .windows(2)
+        .position(|marker| marker == [0xff, 0xd8])
+    {
+        let start = offset + start;
+        let end = bytes[start + 2..]
+            .windows(2)
+            .position(|marker| marker == [0xff, 0xd9])
+            .map(|end| start + 4 + end)?;
+        let candidate = &bytes[start..end];
+        if largest.is_none_or(|current: &[u8]| candidate.len() > current.len()) {
+            largest = Some(candidate);
+        }
+        offset = end;
+    }
+    largest
+}
+
 fn rename_error(from: &Path, to: &Path, error: io::Error) -> String {
     format!(
         "Could not rename {} to {}: {error}",
@@ -159,5 +180,14 @@ mod tests {
         );
         assert!(renamed[0].1.exists());
         let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn embedded_jpeg_prefers_the_largest_preview() {
+        let raw = b"RAW\xff\xd8a\xff\xd9metadata\xff\xd8longer preview\xff\xd9";
+        assert_eq!(
+            embedded_jpeg(raw),
+            Some(&b"\xff\xd8longer preview\xff\xd9"[..])
+        );
     }
 }

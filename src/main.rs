@@ -3,7 +3,7 @@ use iced::{
     widget::{Column, Space, button, column, container, image, row, scrollable, text, text_input},
 };
 use image_renamer::{
-    DEFAULT_FILTER, DEFAULT_REPLACEMENT, ImageFile, rename_selected, scan_directory,
+    DEFAULT_FILTER, DEFAULT_REPLACEMENT, ImageFile, embedded_jpeg, rename_selected, scan_directory,
 };
 use std::{io::Cursor, path::PathBuf};
 
@@ -261,12 +261,18 @@ fn load_preview(path: PathBuf) -> Task<Message> {
         async move {
             let bytes = std::fs::read(&path)
                 .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-            let image = ::image::load_from_memory(&bytes).map_err(|error| {
-                format!(
-                    "Could not decode {} (RAW previews require a JPEG thumbnail): {error}",
-                    path.display()
-                )
-            })?;
+            let image = ::image::load_from_memory(&bytes)
+                .or_else(|_| {
+                    embedded_jpeg(&bytes)
+                        .ok_or(::image::ImageError::Decoding(
+                            ::image::error::DecodingError::new(
+                                ::image::error::ImageFormatHint::Unknown,
+                                "No embedded JPEG preview",
+                            ),
+                        ))
+                        .and_then(::image::load_from_memory)
+                })
+                .map_err(|error| format!("Could not decode {}: {error}", path.display()))?;
             let image = image.resize(1920, 1080, ::image::imageops::FilterType::Lanczos3);
             let mut png = Cursor::new(Vec::new());
             image
