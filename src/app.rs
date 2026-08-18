@@ -1,6 +1,6 @@
 use crate::{
-    files::{self, DEFAULT_FILTER, DEFAULT_REPLACEMENT, ImageFile},
-    preview,
+    files::{DEFAULT_FILTER, DEFAULT_REPLACEMENT, ImageDirectory, ImageFile, RenameOperation},
+    preview::PreviewLoader,
 };
 use iced::{
     ContentFit, Element, Length, Task, Theme,
@@ -55,7 +55,7 @@ impl App {
             zoom: 1.0,
             ..Self::default()
         };
-        (app, load_files(directory, DEFAULT_FILTER.into()))
+        (app, Self::load_files(directory, DEFAULT_FILTER.into()))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -79,7 +79,7 @@ impl App {
                             .as_ref()
                             .and_then(|path| self.files.iter().position(|file| &file.path == path));
                         if let Some(index) = self.displayed {
-                            return load_preview(self.files[index].path.clone());
+                            return Self::load_preview(self.files[index].path.clone());
                         }
                     }
                     Err(error) => self.status = error,
@@ -88,7 +88,7 @@ impl App {
             Message::FilterChanged(filter) => {
                 self.filter = filter;
                 self.busy = true;
-                return load_files(self.directory.clone(), self.filter.clone());
+                return Self::load_files(self.directory.clone(), self.filter.clone());
             }
             Message::ReplacementChanged(replacement) => self.replacement = replacement,
             Message::SetNameChanged(set_name) => self.set_name = set_name,
@@ -96,7 +96,7 @@ impl App {
                 self.displayed = Some(index);
                 self.preview = None;
                 self.status = "Loading preview…".into();
-                return load_preview(self.files[index].path.clone());
+                return Self::load_preview(self.files[index].path.clone());
             }
             Message::Toggle(index) => {
                 if let Some(file) = self.files.get_mut(index) {
@@ -116,7 +116,7 @@ impl App {
                 }
                 self.busy = true;
                 self.status = "Renaming…".into();
-                return rename_files(
+                return Self::rename_files(
                     self.files.clone(),
                     self.filter.clone(),
                     self.replacement.clone(),
@@ -144,7 +144,7 @@ impl App {
                         let directory = self.directory.clone();
                         let filter = self.filter.clone();
                         return Task::perform(
-                            async move { files::scan_directory(&directory, &filter) },
+                            async move { ImageDirectory::new(directory).scan(&filter) },
                             move |result| Message::FilesRefreshed(result, displayed_path),
                         );
                     }
@@ -236,27 +236,32 @@ impl App {
     fn theme(_: &App) -> Theme {
         Theme::Dark
     }
-}
 
-fn load_files(directory: PathBuf, filter: String) -> Task<Message> {
-    Task::perform(
-        async move { files::scan_directory(&directory, &filter) },
-        Message::FilesLoaded,
-    )
-}
+    fn load_files(directory: PathBuf, filter: String) -> Task<Message> {
+        Task::perform(
+            async move { ImageDirectory::new(directory).scan(&filter) },
+            Message::FilesLoaded,
+        )
+    }
 
-fn rename_files(
-    files_to_rename: Vec<ImageFile>,
-    filter: String,
-    replacement: String,
-    set_name: String,
-) -> Task<Message> {
-    Task::perform(
-        async move { files::rename_selected(&files_to_rename, &filter, &replacement, &set_name) },
-        Message::Renamed,
-    )
-}
+    fn rename_files(
+        files_to_rename: Vec<ImageFile>,
+        filter: String,
+        replacement: String,
+        set_name: String,
+    ) -> Task<Message> {
+        Task::perform(
+            async move {
+                RenameOperation::new(&files_to_rename, &filter, &replacement, &set_name).execute()
+            },
+            Message::Renamed,
+        )
+    }
 
-fn load_preview(path: PathBuf) -> Task<Message> {
-    Task::perform(async move { preview::load(&path) }, Message::PreviewLoaded)
+    fn load_preview(path: PathBuf) -> Task<Message> {
+        Task::perform(
+            async move { PreviewLoader::load(&path) },
+            Message::PreviewLoaded,
+        )
+    }
 }
