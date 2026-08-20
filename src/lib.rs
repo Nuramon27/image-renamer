@@ -1,7 +1,4 @@
-mod app;
+pub mod opt;
+pub mod app;
 mod files;
 mod preview;
-
-pub fn run() -> iced::Result {
-    app::run()
-}

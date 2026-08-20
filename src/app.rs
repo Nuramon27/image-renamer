@@ -1,22 +1,19 @@
-use crate::{
-    files::{DEFAULT_FILTER, DEFAULT_REPLACEMENT, ImageDirectory, ImageFile, RenameOperation},
-    preview::PreviewLoader,
-};
+use std::path::PathBuf;
+
+use clap::Parser;
 use iced::{
     ContentFit, Element, Length, Task, Theme,
     widget::{Column, Space, button, column, container, image, row, scrollable, text, text_input},
 };
-use std::path::PathBuf;
 
-pub fn run() -> iced::Result {
-    iced::application(App::new, App::update, App::view)
-        .title("Image Renamer")
-        .theme(App::theme)
-        .run()
-}
+use crate::{
+    files::{DEFAULT_FILTER, DEFAULT_REPLACEMENT, ImageDirectory, ImageFile, RenameOperation},
+    preview::PreviewLoader,
+};
+use crate::opt::Opt;
 
 #[derive(Default)]
-struct App {
+pub struct App {
     directory: PathBuf,
     files: Vec<ImageFile>,
     filter: String,
@@ -30,7 +27,7 @@ struct App {
 }
 
 #[derive(Debug, Clone)]
-enum Message {
+pub enum Message {
     FilesLoaded(Result<Vec<ImageFile>, String>),
     FilesRefreshed(Result<Vec<ImageFile>, String>, Option<PathBuf>),
     FilterChanged(String),
@@ -46,8 +43,9 @@ enum Message {
 }
 
 impl App {
-    fn new() -> (Self, Task<Message>) {
-        let directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    pub fn new() -> (Self, Task<Message>) {
+        let args = Opt::parse();
+        let directory = args.dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         let app = Self {
             directory: directory.clone(),
             filter: DEFAULT_FILTER.into(),
@@ -58,7 +56,7 @@ impl App {
         (app, Self::load_files(directory, DEFAULT_FILTER.into()))
     }
 
-    fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::FilesLoaded(result) => {
                 self.busy = false;
@@ -157,7 +155,7 @@ impl App {
         Task::none()
     }
 
-    fn view(&self) -> Element<'_, Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         let filters = row![
             text_input("Filter regular expression", &self.filter)
                 .on_input(Message::FilterChanged)
@@ -233,7 +231,7 @@ impl App {
         .into()
     }
 
-    fn theme(_: &App) -> Theme {
+    pub fn theme(_: &App) -> Theme {
         Theme::Dark
     }
 
