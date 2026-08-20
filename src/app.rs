@@ -21,7 +21,6 @@ pub struct App {
     set_name: String,
     displayed: Option<usize>,
     preview: Option<image::Handle>,
-    zoom: f32,
     status: String,
     busy: bool,
 }
@@ -38,8 +37,6 @@ pub enum Message {
     PreviewLoaded(Result<Vec<u8>, String>),
     Rename,
     Renamed(Result<Vec<(PathBuf, PathBuf)>, String>),
-    ZoomIn,
-    ZoomOut,
 }
 
 impl App {
@@ -50,7 +47,6 @@ impl App {
             directory: directory.clone(),
             filter: DEFAULT_FILTER.into(),
             replacement: DEFAULT_REPLACEMENT.into(),
-            zoom: 1.0,
             ..Self::default()
         };
         (app, Self::load_files(directory, DEFAULT_FILTER.into()))
@@ -149,8 +145,6 @@ impl App {
                     Err(error) => self.status = error,
                 }
             }
-            Message::ZoomIn => self.zoom = (self.zoom * 1.25).min(4.0),
-            Message::ZoomOut => self.zoom = (self.zoom / 1.25).max(0.25),
         }
         Task::none()
     }
@@ -189,10 +183,14 @@ impl App {
             );
         }
         let preview: Element<'_, _> = match &self.preview {
-            Some(handle) => image(handle.clone())
+            Some(handle) => image::Viewer::new(handle.clone())
+                .content_fit(ContentFit::Contain)
+                .min_scale(0.25)
+                .max_scale(10.0)
+                .filter_method(image::FilterMethod::Linear)
+                .scale_step(0.10)
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .content_fit(ContentFit::Contain)
                 .into(),
             None => container(text(if self.status.is_empty() {
                 "Select an image"
@@ -217,9 +215,6 @@ impl App {
             text_input("Set name", &self.set_name).on_input(Message::SetNameChanged),
             content,
             row![
-                button("−").on_press(Message::ZoomOut),
-                text(format!("Zoom: {:.0}%", self.zoom * 100.0)),
-                button("+").on_press(Message::ZoomIn),
                 Space::new().width(Length::Fill),
                 button(if self.busy { "Working…" } else { "Rename" })
                     .on_press_maybe((!self.busy).then_some(Message::Rename)),
