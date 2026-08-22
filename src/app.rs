@@ -176,6 +176,7 @@ impl App {
                 row![
                     button(text(label))
                         .on_press(Message::Select(index))
+                        .
                         .width(Length::Fill),
                     button("✓").on_press(Message::Toggle(index)),
                 ]
@@ -256,5 +257,18 @@ impl App {
             async move { PreviewLoader::load(&path) },
             Message::PreviewLoaded,
         )
+    }
+
+    fn button_highlighting(selected: bool, theme: &Theme, status: button::Status) -> button::Style {
+        match status {
+            button::Status::Active => button::Style {
+                background: ,
+                text_color: ,
+                border: ,
+                shadow: ,
+                snap:
+            }
+        }
+
     }
 }
