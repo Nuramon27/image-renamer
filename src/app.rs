@@ -5,6 +5,7 @@ use iced::{
     ContentFit, Element, Length, Task, Theme,
     widget::{Column, Space, button, column, container, image, row, scrollable, text, text_input},
 };
+use iced::theme::Base;
 
 use crate::{
     files::{DEFAULT_FILTER, DEFAULT_REPLACEMENT, ImageDirectory, ImageFile, RenameOperation},
@@ -166,17 +167,11 @@ impl App {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("?");
-            let marker = if file.selected { "☑" } else { "☐" };
-            let label = if self.displayed == Some(index) {
-                format!("▶ {marker} {name}")
-            } else {
-                format!("  {marker} {name}")
-            };
             list = list.push(
                 row![
-                    button(text(label))
+                    button(text(name))
                         .on_press(Message::Select(index))
-                        .
+                        .style(move |theme, status| Self::button_highlighting(file.selected, self.displayed == Some(index), theme, status))
                         .width(Length::Fill),
                     button("✓").on_press(Message::Toggle(index)),
                 ]
@@ -259,15 +254,59 @@ impl App {
         )
     }
 
-    fn button_highlighting(selected: bool, theme: &Theme, status: button::Status) -> button::Style {
+    fn button_highlighting(selected: bool, displayed: bool, theme: &Theme, status: button::Status) -> button::Style {
+        use iced::Background::Color;
         match status {
-            button::Status::Active => button::Style {
-                background: ,
-                text_color: ,
-                border: ,
-                shadow: ,
-                snap:
-            }
+            button::Status::Active
+            | button::Status::Hovered => match (displayed, selected) {
+                (false, false) => button::Style {
+                    background: Some(Color(theme.extended_palette().background.base.color)),
+                    text_color: theme.extended_palette().background.base.text,
+                    ..button::Style::default()
+                },
+                (false, true) => button::Style {
+                    background: Some(Color(theme.extended_palette().background.strong.color)),
+                    text_color: theme.extended_palette().background.strong.text,
+                    ..button::Style::default()
+                },
+                (true, false) => button::Style {
+                    background: Some(Color(theme.extended_palette().primary.weak.color)),
+                    text_color: theme.extended_palette().primary.base.text,
+                    ..button::Style::default()
+                },
+                (true, true) => button::Style {
+                    background: Some(Color(theme.extended_palette().primary.base.color)),
+                    text_color: theme.extended_palette().primary.strong.text,
+                    ..button::Style::default()
+                },
+            },
+            button::Status::Disabled => button::Style {
+                background: Some(Color(theme.extended_palette().background.weak.color)),
+                text_color: theme.extended_palette().background.weak.text,
+                ..button::Style::default()
+            },
+            button::Status::Pressed => match (displayed, selected) {
+                (false, false) => button::Style {
+                    background: Some(Color(theme.extended_palette().primary.base.color)),
+                    text_color: theme.extended_palette().primary.base.text,
+                    ..button::Style::default()
+                },
+                (false, true) => button::Style {
+                    background: Some(Color(theme.extended_palette().primary.strong.color)),
+                    text_color: theme.extended_palette().primary.strong.text,
+                    ..button::Style::default()
+                },
+                (true, false) => button::Style {
+                    background: Some(Color(theme.extended_palette().primary.base.color)),
+                    text_color: theme.extended_palette().primary.base.text,
+                    ..button::Style::default()
+                },
+                (true, true) => button::Style {
+                    background: Some(Color(theme.extended_palette().primary.strong.color)),
+                    text_color: theme.extended_palette().primary.strong.text,
+                    ..button::Style::default()
+                },
+            },
         }
 
     }
