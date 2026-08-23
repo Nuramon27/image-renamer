@@ -1,9 +1,9 @@
-use std::path::PathBuf;
+use std::{cmp, path::PathBuf};
 
 use clap::Parser;
 use iced::{
-    ContentFit, Element, Length, Task, Theme,
-    widget::{Column, Space, button, column, container, image, row, scrollable, text, text_input},
+    Subscription,
+    ContentFit, Element, Length, Task, Theme, keyboard, widget::{Column, Space, button, column, container, image, row, scrollable, text, text_input},
 };
 
 use crate::{
@@ -11,6 +11,12 @@ use crate::{
     preview::PreviewLoader,
 };
 use crate::opt::Opt;
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ModifierState {
+    ctrl: bool,
+    shift: bool,
+}
 
 #[derive(Default)]
 pub struct App {
@@ -23,6 +29,7 @@ pub struct App {
     preview: Option<image::Handle>,
     status: String,
     busy: bool,
+    modifiers: ModifierState,
 }
 
 #[derive(Debug, Clone)]
@@ -32,14 +39,27 @@ pub enum Message {
     FilterChanged(String),
     ReplacementChanged(String),
     SetNameChanged(String),
-    Select(usize),
     Toggle(usize),
     PreviewLoaded(Result<Vec<u8>, String>),
     Rename,
     Renamed(Result<Vec<(PathBuf, PathBuf)>, String>),
+    FileClicked(usize),
+    ModifiersChanged {
+        ctrl: bool,
+        shift: bool,
+    }
 }
 
 impl App {
+    pub fn subscription(&self) -> Subscription<Message> {
+        keyboard::listen()
+            .filter_map(|event| match event {
+                keyboard::Event::ModifiersChanged(modifiers) => {
+                    Some(Message::ModifiersChanged { ctrl: modifiers.control(), shift: modifiers.shift() })
+                },
+                _ => None
+            })
+    }
     pub fn new() -> (Self, Task<Message>) {
         let args = Opt::parse();
         let directory = args.dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
@@ -86,12 +106,6 @@ impl App {
             }
             Message::ReplacementChanged(replacement) => self.replacement = replacement,
             Message::SetNameChanged(set_name) => self.set_name = set_name,
-            Message::Select(index) => {
-                self.displayed = Some(index);
-                self.preview = None;
-                self.status = "Loading preview…".into();
-                return Self::load_preview(self.files[index].path.clone());
-            }
             Message::Toggle(index) => {
                 if let Some(file) = self.files.get_mut(index) {
                     file.selected = !file.selected;
@@ -144,6 +158,34 @@ impl App {
                     }
                     Err(error) => self.status = error,
                 }
+            },
+            Message::FileClicked(index) => {
+                if self.modifiers.ctrl {
+                    if self.modifiers.shift {
+                        if let Some(displayed) = self.displayed {
+                            let lower = cmp::min(displayed, index);
+                            let upper = cmp::max(displayed, index);
+                            for ix in lower..=upper {
+                                if let Some(file) = self.files.get_mut(ix) {
+                                    file.selected = !file.selected;
+                                }
+                            }
+                        }
+                    } else {
+                        if let Some(file) = self.files.get_mut(index) {
+                            file.selected = !file.selected;
+                        }
+                    }
+                } else {
+                    self.displayed = Some(index);
+                    self.preview = None;
+                    self.status = "Loading preview…".into();
+                    return Self::load_preview(self.files[index].path.clone());
+                }
+            },
+            Message::ModifiersChanged{ ctrl, shift } => {
+                self.modifiers.ctrl = ctrl;
+                self.modifiers.shift = shift;
             }
         }
         Task::none()
@@ -169,7 +211,7 @@ impl App {
             list = list.push(
                 row![
                     button(text(name))
-                        .on_press(Message::Select(index))
+                        .on_press(Message::FileClicked(index))
                         .style(move |theme, status| Self::button_highlighting(file.selected, self.displayed == Some(index), theme, status))
                         .width(Length::Fill),
                     button("✓").on_press(Message::Toggle(index)),
