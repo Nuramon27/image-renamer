@@ -5,7 +5,6 @@ use iced::{
     ContentFit, Element, Length, Task, Theme,
     widget::{Column, Space, button, column, container, image, row, scrollable, text, text_input},
 };
-use iced::theme::Base;
 
 use crate::{
     files::{DEFAULT_FILTER, DEFAULT_REPLACEMENT, ImageDirectory, ImageFile, RenameOperation},
