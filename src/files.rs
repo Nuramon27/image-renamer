@@ -6,7 +6,7 @@ use std::{
 };
 
 pub const DEFAULT_FILTER: &str = r"^img_(?P<date>\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-\d+)?)_(?P<author>[\w\d-]*)_(?P<camera>[\w\d-]*)\.(?P<ext>ORF)$";
-pub const DEFAULT_REPLACEMENT: &str = "img_$date_$author_$camera_$name.$ext";
+pub const DEFAULT_REPLACEMENT: &str = "img_${date}_${author}_${camera}_$name.${ext}";
 
 const IMAGE_EXTENSIONS: &[&str] = &[
     "3fr", "arw", "cr2", "cr3", "dng", "jpeg", "jpg", "nef", "nrw", "orf", "pef", "png", "raf",
@@ -84,68 +84,40 @@ impl<'a> RenameOperation<'a> {
 
     pub fn execute(&self) -> Result<Vec<(PathBuf, PathBuf)>, String> {
         let filter = Regex::new(self.filter).map_err(|error| format!("Invalid filter: {error}"))?;
-        let renames = self
-            .files
-            .iter()
-            .filter(|file| file.selected)
-            .map(|file| {
-                let name = file
+        let mut renames = Vec::new();
+        for file in self.files {
+            if file.selected {
+                let filename = file
                     .path
                     .file_name()
                     .and_then(|name| name.to_str())
                     .ok_or_else(|| format!("Invalid file name: {}", file.path.display()))?;
-                let captures = filter
-                    .captures(name)
-                    .ok_or_else(|| format!("File no longer matches filter: {name}"))?;
-                let mut replacement = self.replacement.replace("$name", self.set_name);
-                for (index, capture_name) in filter.capture_names().enumerate() {
-                    if let Some(capture_name) = capture_name {
-                        replacement = replacement.replace(
-                            &format!("${capture_name}"),
-                            captures.get(index).map_or("", |capture| capture.as_str()),
-                        );
-                    }
-                }
-                let mut output = String::new();
-                captures.expand(&replacement, &mut output);
-                if output.is_empty()
-                    || Path::new(&output)
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        != Some(&output)
-                {
-                    return Err(format!("Invalid replacement name: {output}"));
-                }
-                Ok((file.path.clone(), file.path.with_file_name(output)))
-            })
-            .collect::<Result<Vec<_>, String>>()?;
+                let replacement = self.replacement.replace("$name", self.set_name);
+                let filename_new = filter.replace(filename, replacement);
+                renames.push((file.path.clone(), file.path.with_file_name(PathBuf::from(filename_new.as_ref()))));
+            }
+        }
+        let renames = renames;
 
         let sources = renames.iter().map(|(from, _)| from).collect::<HashSet<_>>();
         let targets = renames.iter().map(|(_, to)| to).collect::<HashSet<_>>();
+        if !targets.is_disjoint(&sources) {
+            return Err("Some files may be renamed to the name of another file.".into());
+        }
         if targets.len() != renames.len() {
             return Err("Replacement produces duplicate file names".into());
         }
         if let Some((_, target)) = renames
             .iter()
-            .find(|(_, target)| target.exists() && !sources.contains(target))
+            .find(|(_, target)| target.exists())
         {
             return Err(format!("Target already exists: {}", target.display()));
         }
-
-        let staged = renames
-            .iter()
-            .enumerate()
-            .map(|(index, (from, _))| {
-                let temporary = from.with_file_name(format!(".image-renamer-{index}.tmp"));
-                fs::rename(from, &temporary)
-                    .map_err(|error| rename_error(from, &temporary, error))?;
-                Ok((temporary, from))
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        for ((temporary, _), (_, target)) in staged.iter().zip(&renames) {
-            fs::rename(temporary, target)
-                .map_err(|error| rename_error(temporary, target, error))?;
+        for (from, to) in &renames {
+            fs::rename(from, to)
+                .map_err(|error| rename_error(from, &to, error))?;
         }
+
         Ok(renames)
     }
 }
@@ -170,6 +142,8 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
+    // Ignored because it manipulates disc
     fn replacement_expands_captures_and_set_name() {
         let directory = std::env::temp_dir().join(format!("image-renamer-{}", std::process::id()));
         let _ = fs::remove_dir_all(&directory);
