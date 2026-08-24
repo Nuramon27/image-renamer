@@ -6,7 +6,7 @@ use iced::{
     ContentFit, Element, Length, Task, Theme, keyboard, widget::{Column, Space, button, column, container, image, row, scrollable, text, text_input},
 };
 
-use crate::{
+use griphook_logic::{
     files::{DEFAULT_FILTER, DEFAULT_REPLACEMENT, ImageDirectory, ImageFile, RenameOperation},
     preview::PreviewLoader,
 };

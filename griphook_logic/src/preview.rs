@@ -1,3 +1,4 @@
+#[cfg(feature = "rsraw")]
 use std::cmp::Ordering;
 use std::{io::Cursor, path::Path};
 

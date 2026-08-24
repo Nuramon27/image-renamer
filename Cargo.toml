@@ -1,6 +1,6 @@
 [workspace]
 members = [
+    "griphook_logic",
     "griphook_bin_iced"
 ]
 resolver = "3"
-default-run = "griphook_bin_iced"

@@ -1479,7 +1479,17 @@ name = "griphook"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "griphook_logic",
  "iced",
+ "image",
+ "regex",
+ "rsraw",
+]
+
+[[package]]
+name = "griphook_logic"
+version = "0.1.0"
+dependencies = [
  "image",
  "regex",
  "rsraw",
