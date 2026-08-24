@@ -1475,6 +1475,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "griphook"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "iced",
+ "image",
+ "regex",
+ "rsraw",
+]
+
+[[package]]
 name = "guillotiere"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1790,17 +1801,6 @@ dependencies = [
  "tiff",
  "zune-core",
  "zune-jpeg",
-]
-
-[[package]]
-name = "image-renamer"
-version = "0.1.0"
-dependencies = [
- "clap",
- "iced",
- "image",
- "regex",
- "rsraw",
 ]
 
 [[package]]

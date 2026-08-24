@@ -1,7 +1,15 @@
 [package]
-name = "image-renamer"
+name = "griphook"
 version = "0.1.0"
 edition = "2024"
+description = """
+Griphook is a little tool to batch-rename a set of images.
+It lets you view images in a folder, select some of them for renaming,
+and transform their name by matching a regular expression.
+"""
+license = "MIT"
+publish = false
+
 
 [dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
