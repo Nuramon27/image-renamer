@@ -1,4 +1,4 @@
-use std::{cmp, path::PathBuf};
+use std::{borrow::Cow, cmp, path::PathBuf};
 
 use clap::Parser;
 use iced::{
@@ -7,8 +7,7 @@ use iced::{
 };
 
 use griphook_logic::{
-    files::{DEFAULT_FILTER, DEFAULT_REPLACEMENT, ImageDirectory, ImageFile, RenameOperation},
-    preview::PreviewLoader,
+    files::{DEFAULT_PARSER, DEFAULT_REPLACEMENT, FileError, ImageDirectory, ImageFile, RenameOperation, rename::RenameError}, preview::PreviewLoader,
 };
 use crate::opt::Opt;
 
@@ -19,30 +18,49 @@ struct ModifierState {
 }
 
 #[derive(Default)]
-pub struct App {
+struct FileState {
     directory: PathBuf,
     files: Vec<ImageFile>,
     filter: String,
+    displayed: Option<usize>,
+    status: Option<FileError>
+}
+
+struct PreviewState {
+    preview: Option<image::Handle>,
+    status: Result<Option<String>, String>,
+}
+
+impl Default for PreviewState {
+    fn default() -> Self {
+        PreviewState {
+            preview: None,
+            status: Ok(None),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct App {
+    file: FileState,
+    preview: PreviewState,
     replacement: String,
     set_name: String,
-    displayed: Option<usize>,
-    preview: Option<image::Handle>,
-    status: String,
     busy: bool,
     modifiers: ModifierState,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    FilesLoaded(Result<Vec<ImageFile>, String>),
-    FilesRefreshed(Result<Vec<ImageFile>, String>, Option<PathBuf>),
+    FilesLoaded(Result<Vec<ImageFile>, FileError>),
+    FilesRefreshed(Result<Vec<ImageFile>, FileError>, Option<PathBuf>),
     FilterChanged(String),
     ReplacementChanged(String),
     SetNameChanged(String),
     Toggle(usize),
     PreviewLoaded(Result<Vec<u8>, String>),
     Rename,
-    Renamed(Result<Vec<(PathBuf, PathBuf)>, String>),
+    Renamed(Result<Vec<(PathBuf, PathBuf)>, RenameError>),
     FileClicked(usize),
     ModifiersChanged {
         ctrl: bool,
@@ -64,12 +82,15 @@ impl App {
         let args = Opt::parse();
         let directory = args.dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         let app = Self {
-            directory: directory.clone(),
-            filter: DEFAULT_FILTER.into(),
+            file: FileState {
+                directory: directory.clone(),
+                filter: DEFAULT_PARSER.into(),
+                ..Default::default()
+            },
             replacement: DEFAULT_REPLACEMENT.into(),
             ..Self::default()
         };
-        (app, Self::load_files(directory, DEFAULT_FILTER.into()))
+        (app, Self::load_files(directory, DEFAULT_PARSER.into()))
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -78,55 +99,55 @@ impl App {
                 self.busy = false;
                 match result {
                     Ok(files) => {
-                        self.status = format!("{} matching image(s)", files.len());
-                        self.files = files;
+                        self.file.status = None;
+                        self.file.files = files;
                     }
-                    Err(error) => self.status = error,
+                    Err(error) => self.file.status = Some(error),
                 }
             }
             Message::FilesRefreshed(result, displayed_path) => {
                 self.busy = false;
                 match result {
                     Ok(files) => {
-                        self.files = files;
-                        self.displayed = displayed_path
+                        self.file.files = files;
+                        self.file.displayed = displayed_path
                             .as_ref()
-                            .and_then(|path| self.files.iter().position(|file| &file.path == path));
-                        if let Some(index) = self.displayed {
-                            return Self::load_preview(self.files[index].path.clone());
+                            .and_then(|path| self.file.files.iter().position(|file| &file.path == path));
+                        self.file.status = None;
+                        if let Some(index) = self.file.displayed {
+                            return Self::load_preview(self.file.files[index].path.clone());
                         }
                     }
-                    Err(error) => self.status = error,
+                    Err(error) => self.file.status = Some(error),
                 }
             }
             Message::FilterChanged(filter) => {
-                self.filter = filter;
+                self.file.filter = filter;
                 self.busy = true;
-                return Self::load_files(self.directory.clone(), self.filter.clone());
+                return Self::load_files(self.file.directory.clone(), self.file.filter.clone());
             }
             Message::ReplacementChanged(replacement) => self.replacement = replacement,
             Message::SetNameChanged(set_name) => self.set_name = set_name,
             Message::Toggle(index) => {
-                if let Some(file) = self.files.get_mut(index) {
+                if let Some(file) = self.file.files.get_mut(index) {
                     file.selected = !file.selected;
                 }
             }
             Message::PreviewLoaded(result) => match result {
                 Ok(bytes) => {
-                    self.preview = Some(image::Handle::from_bytes(bytes));
-                    self.status.clear();
+                    self.preview.preview = Some(image::Handle::from_bytes(bytes));
+                    self.preview.status = Ok(None);
                 }
-                Err(error) => self.status = error,
+                Err(error) => self.preview.status = Err(error),
             },
             Message::Rename => {
                 if self.busy {
                     return Task::none();
                 }
                 self.busy = true;
-                self.status = "Renaming…".into();
                 return Self::rename_files(
-                    self.files.clone(),
-                    self.filter.clone(),
+                    self.file.files.clone(),
+                    self.file.filter.clone(),
                     self.replacement.clone(),
                     self.set_name.clone(),
                 );
@@ -136,8 +157,9 @@ impl App {
                 match result {
                     Ok(renamed) => {
                         let displayed_path = self
+                            .file
                             .displayed
-                            .and_then(|index| self.files.get(index))
+                            .and_then(|index| self.file.files.get(index))
                             .map(|file| file.path.clone());
                         let displayed_path = displayed_path.and_then(|path| {
                             renamed
@@ -146,41 +168,41 @@ impl App {
                                 .map(|(_, to)| to.clone())
                                 .or(Some(path))
                         });
-                        self.preview = None;
-                        self.status = format!("Renamed {} image(s)", renamed.len());
+                        self.preview.preview = None;
                         self.busy = true;
-                        let directory = self.directory.clone();
-                        let filter = self.filter.clone();
+                        let directory = self.file.directory.clone();
+                        let filter = self.file.filter.clone();
+                        self.file.status = None;
                         return Task::perform(
                             async move { ImageDirectory::new(directory).scan(&filter) },
                             move |result| Message::FilesRefreshed(result, displayed_path),
                         );
                     }
-                    Err(error) => self.status = error,
+                    Err(error) => todo!(),
                 }
             },
             Message::FileClicked(index) => {
                 if self.modifiers.ctrl {
                     if self.modifiers.shift {
-                        if let Some(displayed) = self.displayed {
+                        if let Some(displayed) = self.file.displayed {
                             let lower = cmp::min(displayed, index);
                             let upper = cmp::max(displayed, index);
                             for ix in lower..=upper {
-                                if let Some(file) = self.files.get_mut(ix) {
+                                if let Some(file) = self.file.files.get_mut(ix) {
                                     file.selected = !file.selected;
                                 }
                             }
                         }
                     } else {
-                        if let Some(file) = self.files.get_mut(index) {
+                        if let Some(file) = self.file.files.get_mut(index) {
                             file.selected = !file.selected;
                         }
                     }
                 } else {
-                    self.displayed = Some(index);
-                    self.preview = None;
-                    self.status = "Loading preview…".into();
-                    return Self::load_preview(self.files[index].path.clone());
+                    self.file.displayed = Some(index);
+                    self.preview.preview = None;
+                    self.preview.status = Ok(Some("Loading preview…".to_string()));
+                    return Self::load_preview(self.file.files[index].path.clone());
                 }
             },
             Message::ModifiersChanged{ ctrl, shift } => {
@@ -193,7 +215,7 @@ impl App {
 
     pub fn view(&self) -> Element<'_, Message> {
         let filters = row![
-            text_input("Filter regular expression", &self.filter)
+            text_input("Filter regular expression", &self.file.filter)
                 .on_input(Message::FilterChanged)
                 .width(Length::FillPortion(1)),
             text_input("Replacement", &self.replacement)
@@ -201,25 +223,35 @@ impl App {
                 .width(Length::FillPortion(1)),
         ]
         .spacing(10);
-        let mut list = Column::new().spacing(2);
-        for (index, file) in self.files.iter().enumerate() {
-            let name = file
-                .path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("?");
-            list = list.push(
-                row![
-                    button(text(name))
-                        .on_press(Message::FileClicked(index))
-                        .style(move |theme, status| Self::button_highlighting(file.selected, self.displayed == Some(index), theme, status))
-                        .width(Length::Fill),
-                    button("✓").on_press(Message::Toggle(index)),
-                ]
-                .spacing(4),
-            );
-        }
-        let preview: Element<'_, _> = match &self.preview {
+        let list: Element<'_, _> = match &self.file.status {
+            None => {
+                let mut list = Column::new().spacing(2);
+                for (index, file) in self.file.files.iter().enumerate() {
+                    let name = file
+                        .path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("?");
+                    list = list.push(
+                        row![
+                            button(text(name))
+                                .on_press(Message::FileClicked(index))
+                                .style(move |theme, status| Self::button_highlighting(file.selected, self.file.displayed == Some(index), theme, status))
+                                .width(Length::Fill),
+                            button("✓").on_press(Message::Toggle(index)),
+                        ]
+                        .spacing(4),
+                    );
+                }
+                list.into()
+            },
+            Some(err) => {
+                container(text(err.to_string()))
+                    .center(Length::Fill)
+                    .into()
+            },
+        };
+        let preview: Element<'_, _> = match &self.preview.preview {
             Some(handle) => image::Viewer::new(handle.clone())
                 .content_fit(ContentFit::Contain)
                 .min_scale(0.25)
@@ -229,13 +261,13 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-            None => container(text(if self.status.is_empty() {
-                "Select an image"
-            } else {
-                &self.status
+            None => container(text(match &self.preview.status {
+                Ok(None) => Cow::Borrowed("Select an image"),
+                Ok(Some(status)) => Cow::Borrowed(status.as_str()),
+                Err(err) => Cow::Owned(format!("Error: {}", err))
             }))
-            .center(Length::Fill)
-            .into(),
+                .center(Length::Fill)
+                .into(),
         };
         let content = row![
             scrollable(list)
@@ -245,8 +277,8 @@ impl App {
                 .width(Length::FillPortion(3))
                 .height(Length::Fill),
         ]
-        .spacing(10)
-        .height(Length::Fill);
+            .spacing(10)
+            .height(Length::Fill);
         column![
             filters,
             text_input("Set name", &self.set_name).on_input(Message::SetNameChanged),
