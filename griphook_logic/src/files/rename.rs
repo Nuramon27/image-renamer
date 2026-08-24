@@ -1,3 +1,5 @@
+//! Contains the functions for renaming files
+
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::{fmt, fs};
@@ -6,30 +8,28 @@ use regex::Regex;
 
 use super::ImageFile;
 
+/// Specifies an Operation which renames files matching a [`parser`](RenameOperation::parser)
+/// regular expression as specified by a [`replacement`](RenameOperation::replacement)
+/// string.
 pub struct RenameOperation<'a> {
-    files: &'a [ImageFile],
-    filter: &'a str,
-    replacement: &'a str,
-    set_name: &'a str,
+    /// The list of files to be renamed. They should all already match
+    /// [`parser`](RenameOperation::parser).
+    pub files: &'a [ImageFile],
+    /// Determines how parts of the filenames are extracted as Regex capture groups.
+    pub parser: &'a str,
+    /// Specifies how the files should be renamed.
+    ///
+    /// Capture groups in `replacement` specified by `$xyz` or `$n` are expanded
+    /// to the values captured by [`parser`](RenameOperation::parser).
+    pub replacement: &'a str,
+    /// The string to which the special variable `$name` should be expanded in
+    /// [`replacement`](RenameOperation::replacement).
+    pub set_name: &'a str,
 }
 
 impl<'a> RenameOperation<'a> {
-    pub fn new(
-        files: &'a [ImageFile],
-        filter: &'a str,
-        replacement: &'a str,
-        set_name: &'a str,
-    ) -> Self {
-        Self {
-            files,
-            filter,
-            replacement,
-            set_name,
-        }
-    }
-
     pub fn execute(&self) -> Result<Vec<(PathBuf, PathBuf)>, RenameError> {
-        let filter = Regex::new(self.filter).map_err(RenameError::InvalidRegex)?;
+        let filter = Regex::new(self.parser).map_err(RenameError::InvalidRegex)?;
         let mut renames = Vec::new();
         for file in self.files {
             if file.selected {
@@ -43,6 +43,8 @@ impl<'a> RenameOperation<'a> {
         }
         let renames = renames;
 
+        // Diligence checks: Target names should be unique, no file should be
+        // renamed to the current name of another file and no target file should already exist.
         let sources = renames.iter().map(|(from, _)| from).collect::<HashSet<_>>();
         let targets = renames.iter().map(|(_, to)| to).collect::<HashSet<_>>();
         if !targets.is_disjoint(&sources) {
@@ -95,7 +97,7 @@ impl fmt::Display for RenameError {
                 f, "Target file {} already exists", path.to_string_lossy()
             ),
             OnRename{ from, to, err } => write!(
-                f, "Error when renaming file {} into {}: {}", 
+                f, "Error when renaming file {} into {}: {}",
                 from.to_string_lossy(), to.to_string_lossy(), err
             ),
         }
@@ -120,7 +122,12 @@ mod tests {
             path: source.clone(),
             selected: true,
         }];
-        let renamed = RenameOperation::new(&files, DEFAULT_PARSER, DEFAULT_REPLACEMENT, "holiday")
+        let renamed = RenameOperation {
+            files: &files,
+            parser: DEFAULT_PARSER,
+            replacement: DEFAULT_REPLACEMENT,
+            set_name: "holiday"
+        }
             .execute()
             .unwrap();
         assert_eq!(

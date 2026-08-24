@@ -308,13 +308,19 @@ impl App {
 
     fn rename_files(
         files_to_rename: Vec<ImageFile>,
-        filter: String,
+        parser: String,
         replacement: String,
         set_name: String,
     ) -> Task<Message> {
         Task::perform(
             async move {
-                RenameOperation::new(&files_to_rename, &filter, &replacement, &set_name).execute()
+                RenameOperation {
+                    files: &files_to_rename,
+                    parser: &parser,
+                    replacement: &replacement,
+                    set_name: &set_name
+                }
+                .execute()
             },
             Message::Renamed,
         )
