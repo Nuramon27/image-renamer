@@ -1,4 +1,7 @@
-use std::{borrow::Cow, cmp, path::PathBuf};
+use std::cmp;
+use std::iter;
+use std::path::PathBuf;
+use std::borrow::Cow;
 
 use clap::Parser;
 use iced::{
@@ -28,6 +31,7 @@ struct FileState {
 
 struct PreviewState {
     preview: Option<image::Handle>,
+    old_displayed_file: Option<PathBuf>,
     status: Result<Option<String>, String>,
 }
 
@@ -35,6 +39,7 @@ impl Default for PreviewState {
     fn default() -> Self {
         PreviewState {
             preview: None,
+            old_displayed_file: None,
             status: Ok(None),
         }
     }
@@ -136,6 +141,7 @@ impl App {
             Message::PreviewLoaded(result) => match result {
                 Ok(bytes) => {
                     self.preview.preview = Some(image::Handle::from_bytes(bytes));
+                    self.preview.old_displayed_file = None;
                     self.preview.status = Ok(None);
                 }
                 Err(error) => self.preview.status = Err(error),
@@ -145,6 +151,9 @@ impl App {
                     return Task::none();
                 }
                 self.busy = true;
+                if let Some(displayed_file) = &self.file.displayed {
+                    self.preview.old_displayed_file = Some(self.file.files[*displayed_file].path.clone())
+                }
                 return Self::rename_files(
                     self.file.files.clone(),
                     self.file.filter.clone(),
@@ -168,15 +177,23 @@ impl App {
                                 .map(|(_, to)| to.clone())
                                 .or(Some(path))
                         });
-                        self.preview.preview = None;
+                        let load_preview_task = if let Some(old_displayed_file) = self.preview.old_displayed_file.take() {
+                            if let Some((_, new_displayed_file)) = renamed.iter().find(|(f, _)| f == &old_displayed_file) {
+                                Some(Self::load_preview(new_displayed_file.to_owned()))
+                            } else {
+                                Some(Self::load_preview(old_displayed_file.to_owned()))
+                            }
+                        } else {
+                            None
+                        };
                         self.busy = true;
                         let directory = self.file.directory.clone();
                         let filter = self.file.filter.clone();
                         self.file.status = None;
-                        return Task::perform(
+                        return Task::batch(load_preview_task.into_iter().chain(iter::once(Task::perform(
                             async move { ImageDirectory::new(directory).scan(&filter) },
                             move |result| Message::FilesRefreshed(result, displayed_path),
-                        );
+                        ))));
                     }
                     Err(error) => todo!(),
                 }
@@ -328,6 +345,7 @@ impl App {
 
     fn load_preview(path: PathBuf) -> Task<Message> {
         Task::perform(
+            // TODO: Check if this might be the file already open.
             async move { PreviewLoader::load(&path) },
             Message::PreviewLoaded,
         )
