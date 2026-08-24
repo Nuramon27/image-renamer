@@ -1481,9 +1481,6 @@ dependencies = [
  "clap",
  "griphook_logic",
  "iced",
- "image",
- "regex",
- "rsraw",
 ]
 
 [[package]]

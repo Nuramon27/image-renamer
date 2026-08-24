@@ -12,14 +12,15 @@ publish = false
 
 
 [dependencies]
+# Necessary for parsing of command line arguments
 clap = { version = "4.6.6", features = ["derive"] }
+
+# Necessary for the GUI
 iced = { version = "0.14.0", features = ["image"] }
-rsraw = { version = "0.1.1", optional = true }
-image = { version = "0.25.10", default-features = false, features = ["jpeg", "bmp", "png", "tiff", "webp"] }
-regex = { version = "1.13.1", default-features = false, features = ["std", "unicode"] }
+
 griphook_logic = { path = "../griphook_logic", default-features = false }
 
 [features]
 default = []
-rsraw = ["dep:rsraw", "griphook_logic/rsraw"]
-perf = ["regex/perf", "griphook_logic/perf"]
+rsraw = ["griphook_logic/rsraw"]
+perf = ["griphook_logic/perf"]

@@ -6,6 +6,8 @@ description = """
 Griphook is a little tool to batch-rename a set of images.
 It lets you view images in a folder, select some of them for renaming,
 and transform their name by matching a regular expression.
+
+This is the library containing the program logic without the GUI.
 """
 license = "MIT"
 publish = false
@@ -15,9 +17,14 @@ crate-type = ["lib"]
 
 
 [dependencies]
-rsraw = { version = "0.1.1", optional = true }
-image = { version = "0.25.10", default-features = false, features = ["jpeg", "bmp", "png", "tiff", "webp"] }
+# Necessary for file filtering and parsing
 regex = { version = "1.13.1", default-features = false, features = ["std", "unicode"] }
+
+# Necessary for working with images
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "bmp", "png", "tiff", "webp"] }
+
+# Necessary for opening RAW image files
+rsraw = { version = "0.1.1", optional = true }
 
 [features]
 default = []
