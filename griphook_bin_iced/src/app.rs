@@ -266,6 +266,10 @@ impl App {
                 .spacing(4),
             );
         }
+        let list = scrollable(list)
+            .spacing(4)
+            .width(Length::Fill)
+            .height(Length::Fill);
         let list_area = if let Some((color, err_message)) = self.error_message() {
             let error_text = container(Text::new(err_message)
                     .color(Color::from_rgb8(0xe1, 0xe5, 0xef))
@@ -275,16 +279,12 @@ impl App {
                     ..Default::default()
                 });
             column![
-                scrollable(list)
-                    .width(Length::Fill)
-                    .height(Length::Fill),
+                list,
                 error_text
             ]
         } else {
             column![
-                scrollable(list)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
+                list
             ]
         };
         let preview: Element<'_, _> = match &self.preview.preview {
