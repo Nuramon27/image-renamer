@@ -267,9 +267,13 @@ impl App {
             );
         }
         let list_area = if let Some((color, err_message)) = self.error_message() {
-            let error_text = Text::new(err_message)
-                .color(color)
-                .align_x(Alignment::Center);
+            let error_text = container(Text::new(err_message)
+                    .color(Color::from_rgb8(0xe1, 0xe5, 0xef))
+                    .align_x(Alignment::Center))
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(color)),
+                    ..Default::default()
+                });
             column![
                 scrollable(list)
                     .width(Length::Fill)
