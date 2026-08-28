@@ -4,9 +4,11 @@ use std::path::PathBuf;
 use std::borrow::Cow;
 
 use clap::Parser;
+use iced::Alignment;
+use iced::Color;
 use iced::{
     Subscription,
-    ContentFit, Element, Length, Task, Theme, keyboard, widget::{Column, Space, button, column, container, image, row, scrollable, text, text_input},
+    ContentFit, Element, Length, Task, Theme, keyboard, widget::{Column, Space, Text, button, column, container, image, row, scrollable, text, text_input},
 };
 
 use griphook_logic::{
@@ -45,6 +47,10 @@ impl Default for PreviewState {
     }
 }
 
+enum GriphookError {
+    OnRename(RenameError)
+}
+
 #[derive(Default)]
 pub struct App {
     file: FileState,
@@ -53,6 +59,7 @@ pub struct App {
     set_name: String,
     busy: bool,
     modifiers: ModifierState,
+    error_status: Option<GriphookError>
 }
 
 #[derive(Debug, Clone)]
@@ -186,6 +193,7 @@ impl App {
                         } else {
                             None
                         };
+                        self.error_status = None;
                         self.busy = true;
                         let directory = self.file.directory.clone();
                         let filter = self.file.filter.clone();
@@ -195,7 +203,7 @@ impl App {
                             move |result| Message::FilesRefreshed(result, displayed_path),
                         ))));
                     }
-                    Err(error) => todo!(),
+                    Err(err) => self.error_status = Some(GriphookError::OnRename(err)),
                 }
             },
             Message::FileClicked(index) => {
@@ -240,33 +248,40 @@ impl App {
                 .width(Length::FillPortion(1)),
         ]
         .spacing(10);
-        let list: Element<'_, _> = match &self.file.status {
-            None => {
-                let mut list = Column::new().spacing(2);
-                for (index, file) in self.file.files.iter().enumerate() {
-                    let name = file
-                        .path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("?");
-                    list = list.push(
-                        row![
-                            button(text(name))
-                                .on_press(Message::FileClicked(index))
-                                .style(move |theme, status| Self::button_highlighting(file.selected, self.file.displayed == Some(index), theme, status))
-                                .width(Length::Fill),
-                            button("✓").on_press(Message::Toggle(index)),
-                        ]
-                        .spacing(4),
-                    );
-                }
-                list.into()
-            },
-            Some(err) => {
-                container(text(err.to_string()))
-                    .center(Length::Fill)
-                    .into()
-            },
+        let mut list = Column::new().spacing(2);
+        for (index, file) in self.file.files.iter().enumerate() {
+            let name = file
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("?");
+            list = list.push(
+                row![
+                    button(text(name))
+                        .on_press(Message::FileClicked(index))
+                        .style(move |theme, status| Self::button_highlighting(file.selected, self.file.displayed == Some(index), theme, status))
+                        .width(Length::Fill),
+                    button("✓").on_press(Message::Toggle(index)),
+                ]
+                .spacing(4),
+            );
+        }
+        let list_area = if let Some((color, err_message)) = self.error_message() {
+            let error_text = Text::new(err_message)
+                .color(color)
+                .align_x(Alignment::Center);
+            column![
+                scrollable(list)
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+                error_text
+            ]
+        } else {
+            column![
+                scrollable(list)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+            ]
         };
         let preview: Element<'_, _> = match &self.preview.preview {
             Some(handle) => image::Viewer::new(handle.clone())
@@ -287,9 +302,7 @@ impl App {
                 .into(),
         };
         let content = row![
-            scrollable(list)
-                .width(Length::FillPortion(2))
-                .height(Length::Fill),
+            list_area.width(Length::FillPortion(2)),
             container(preview)
                 .width(Length::FillPortion(3))
                 .height(Length::Fill),
@@ -349,6 +362,18 @@ impl App {
             async move { preview::load(&path) },
             Message::PreviewLoaded,
         )
+    }
+
+    fn error_message(&self) -> Option<(Color, String)> {
+        if let Some(own_err) = &self.error_status {
+            match own_err {
+                GriphookError::OnRename(err) => Some((Color::from_rgb8(0x80, 0x15, 0x15), err.to_string()))
+            }
+        } else if let Some(file_err) = &self.file.status {
+            Some((Color::from_rgb8(0x80, 0x6d, 0x15), file_err.to_string()))
+        } else {
+            None
+        }
     }
 
     fn button_highlighting(selected: bool, displayed: bool, theme: &Theme, status: button::Status) -> button::Style {
