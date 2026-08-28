@@ -10,7 +10,7 @@ use iced::{
 };
 
 use griphook_logic::{
-    files::{DEFAULT_PARSER, DEFAULT_REPLACEMENT, FileError, ImageDirectory, ImageFile, RenameOperation, rename::RenameError}, preview::PreviewLoader,
+    files::{DEFAULT_PARSER, DEFAULT_REPLACEMENT, FileError, ImageDirectory, ImageFile, RenameOperation, rename::RenameError}, preview,
 };
 use crate::opt::Opt;
 
@@ -346,7 +346,7 @@ impl App {
     fn load_preview(path: PathBuf) -> Task<Message> {
         Task::perform(
             // TODO: Check if this might be the file already open.
-            async move { PreviewLoader::load(&path) },
+            async move { preview::load(&path) },
             Message::PreviewLoaded,
         )
     }
