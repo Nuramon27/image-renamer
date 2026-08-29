@@ -1,4 +1,5 @@
 use std::cmp;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter;
 use std::path::PathBuf;
 use std::borrow::Cow;
@@ -37,6 +38,24 @@ struct PreviewState {
     status: Result<Option<String>, String>,
 }
 
+/// Thumbnails that have been decoded, are waiting to be decoded, or are in flight.
+struct ThumbnailState {
+    cache: HashMap<PathBuf, image::Handle>,
+    queued: VecDeque<PathBuf>,
+    loading: HashSet<PathBuf>,
+    discarded: HashSet<PathBuf>,
+    max_loading: usize,
+}
+
+impl Default for ThumbnailState {
+    fn default() -> Self {
+        let max_loading = std::thread::available_parallelism()
+            .map(|threads| (threads.get() / 3).max(1))
+            .unwrap_or(1);
+        Self { cache: HashMap::new(), queued: VecDeque::new(), loading: HashSet::new(), discarded: HashSet::new(), max_loading }
+    }
+}
+
 impl Default for PreviewState {
     fn default() -> Self {
         PreviewState {
@@ -55,6 +74,7 @@ enum GriphookError {
 pub struct App {
     file: FileState,
     preview: PreviewState,
+    thumbnails: ThumbnailState,
     replacement: String,
     set_name: String,
     busy: bool,
@@ -71,6 +91,8 @@ pub enum Message {
     SetNameChanged(String),
     Toggle(usize),
     PreviewLoaded(Result<Vec<u8>, String>),
+    ThumbnailLoaded(PathBuf, Result<Vec<u8>, String>),
+    Scrolled { offset_y: f32, height: f32 },
     Rename,
     Renamed(Result<Vec<(PathBuf, PathBuf)>, RenameError>),
     FileClicked(usize),
@@ -113,6 +135,7 @@ impl App {
                     Ok(files) => {
                         self.file.status = None;
                         self.file.files = files;
+                        return self.schedule_thumbnails(0, 16);
                     }
                     Err(error) => self.file.status = Some(error),
                 }
@@ -126,9 +149,10 @@ impl App {
                             .as_ref()
                             .and_then(|path| self.file.files.iter().position(|file| &file.path == path));
                         self.file.status = None;
-                        if let Some(index) = self.file.displayed {
-                            return Self::load_preview(self.file.files[index].path.clone());
-                        }
+                        let thumbnails = self.schedule_thumbnails(0, 16);
+                        let preview = self.file.displayed
+                            .map(|index| Self::load_preview(self.file.files[index].path.clone()));
+                        return Task::batch(iter::once(thumbnails).chain(preview));
                     }
                     Err(error) => self.file.status = Some(error),
                 }
@@ -153,11 +177,27 @@ impl App {
                 }
                 Err(error) => self.preview.status = Err(error),
             },
+            Message::ThumbnailLoaded(path, result) => {
+                self.thumbnails.loading.remove(&path);
+                if !self.thumbnails.discarded.remove(&path) && let Ok(bytes) = result {
+                    self.thumbnails.cache.insert(path, image::Handle::from_bytes(bytes));
+                }
+                if !self.busy {
+                    return self.start_thumbnail_loads();
+                }
+            },
+            Message::Scrolled { offset_y, height } => {
+                let first = (offset_y / Self::FILE_ROW_HEIGHT).floor().max(0.0) as usize;
+                let visible = (height / Self::FILE_ROW_HEIGHT).ceil() as usize + 2;
+                return self.schedule_thumbnails(first, visible);
+            },
             Message::Rename => {
                 if self.busy {
                     return Task::none();
                 }
                 self.busy = true;
+                self.thumbnails.queued.clear();
+                self.thumbnails.discarded.extend(self.thumbnails.loading.clone());
                 if let Some(displayed_file) = &self.file.displayed {
                     self.preview.old_displayed_file = Some(self.file.files[*displayed_file].path.clone())
                 }
@@ -172,6 +212,11 @@ impl App {
                 self.busy = false;
                 match result {
                     Ok(renamed) => {
+                        for (from, to) in &renamed {
+                            if let Some(thumbnail) = self.thumbnails.cache.remove(from) {
+                                self.thumbnails.cache.insert(to.clone(), thumbnail);
+                            }
+                        }
                         let displayed_path = self
                             .file
                             .displayed
@@ -203,7 +248,10 @@ impl App {
                             move |result| Message::FilesRefreshed(result, displayed_path),
                         ))));
                     }
-                    Err(err) => self.error_status = Some(GriphookError::OnRename(err)),
+                    Err(err) => {
+                        self.error_status = Some(GriphookError::OnRename(err));
+                        return self.schedule_thumbnails(0, 16);
+                    },
                 }
             },
             Message::FileClicked(index) => {
@@ -255,9 +303,17 @@ impl App {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("?");
+            let label = if let Some(thumbnail) = self.thumbnails.cache.get(&file.path) {
+                row![
+                    image(thumbnail.clone()).width(36).height(36).content_fit(ContentFit::Cover),
+                    text(name),
+                ].spacing(4)
+            } else {
+                row![text(name)]
+            };
             list = list.push(
                 row![
-                    button(text(name))
+                    button(label)
                         .on_press(Message::FileClicked(index))
                         .style(move |theme, status| Self::button_highlighting(file.selected, self.file.displayed == Some(index), theme, status))
                         .width(Length::Fill),
@@ -269,7 +325,11 @@ impl App {
         let list = scrollable(list)
             .spacing(4)
             .width(Length::Fill)
-            .height(Length::Fill);
+            .height(Length::Fill)
+            .on_scroll(|viewport| Message::Scrolled {
+                offset_y: viewport.absolute_offset().y,
+                height: viewport.bounds().height,
+            });
         let list_area = if let Some((color, err_message)) = self.error_message() {
             let error_text = container(Text::new(err_message)
                     .color(Color::from_rgb8(0xe1, 0xe5, 0xef))
@@ -365,6 +425,50 @@ impl App {
             // TODO: Check if this might be the file already open.
             async move { preview::load(&path) },
             Message::PreviewLoaded,
+        )
+    }
+
+    const FILE_ROW_HEIGHT: f32 = 42.0;
+
+    /// Queues visible files first, leaving queued off-screen work available for later.
+    fn schedule_thumbnails(&mut self, first: usize, visible: usize) -> Task<Message> {
+        if self.busy {
+            return Task::none();
+        }
+        let paths = self.file.files.iter().skip(first).take(visible)
+            .map(|file| file.path.clone()).collect::<Vec<_>>();
+        for path in paths.into_iter().rev() {
+            if !self.thumbnails.cache.contains_key(&path)
+                && !self.thumbnails.loading.contains(&path)
+                && !self.thumbnails.queued.contains(&path)
+            {
+                self.thumbnails.queued.push_front(path);
+            }
+        }
+        self.start_thumbnail_loads()
+    }
+
+    /// Starts only the bounded number of thumbnail tasks allowed by this application.
+    fn start_thumbnail_loads(&mut self) -> Task<Message> {
+        if self.busy {
+            return Task::none();
+        }
+        let mut tasks = Vec::new();
+        while self.thumbnails.loading.len() < self.thumbnails.max_loading {
+            let Some(path) = self.thumbnails.queued.pop_front() else { break };
+            self.thumbnails.loading.insert(path.clone());
+            tasks.push(Self::load_thumbnail(path));
+        }
+        Task::batch(tasks)
+    }
+
+    fn load_thumbnail(path: PathBuf) -> Task<Message> {
+        Task::perform(
+            async move {
+                let result = griphook_logic::thumbnail::load(&path);
+                (path, result)
+            },
+            |(path, result)| Message::ThumbnailLoaded(path, result),
         )
     }
 
