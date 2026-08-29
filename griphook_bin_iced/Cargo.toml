@@ -1,6 +1,6 @@
 [package]
 name = "griphook"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = """
 Griphook is a little tool to batch-rename a set of images.
