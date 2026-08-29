@@ -68,7 +68,7 @@ pub enum ArrowKey {
 #[derive(Debug, Clone)]
 pub enum Message {
     FilesLoaded(Result<Vec<ImageFile>, FileError>),
-    FilesRefreshed(Result<Vec<ImageFile>, FileError>),
+    FilesRefreshedAfterRename(Result<Vec<ImageFile>, FileError>, Vec<(PathBuf, PathBuf)>),
     FilterChanged(String),
     ReplacementChanged(String),
     SetNameChanged(String),
@@ -128,17 +128,19 @@ impl App {
                     Ok(files) => {
                         self.file.status = None;
                         self.file.files = files;
+                        self.find_displayed_path_anew(&None);
+                        return self.ensure_preview_loaded();
                     }
                     Err(error) => self.file.status = Some(error),
                 }
             }
-            Message::FilesRefreshed(result) => {
+            Message::FilesRefreshedAfterRename(result, renamed) => {
                 self.busy = false;
                 match result {
                     Ok(files) => {
                         self.file.files = files;
                         self.file.status = None;
-                        self.find_displayed_path_anew(&None);
+                        self.find_displayed_path_anew(&Some(renamed));
                         return self.ensure_preview_loaded();
                     }
                     Err(error) => self.file.status = Some(error),
@@ -179,20 +181,15 @@ impl App {
                 self.busy = false;
                 match result {
                     Ok(renamed) => {
-                        self.find_displayed_path_anew(&Some(renamed));
-                        let load_preview_task = self.ensure_preview_loaded();
                         self.error_status = None;
                         self.busy = true;
                         let directory = self.file.directory.clone();
                         let filter = self.file.filter.clone();
                         self.file.status = None;
-                        return Task::batch([
-                            load_preview_task,
-                            Task::perform(
-                                async move { ImageDirectory::new(directory).scan(&filter) },
-                                move |result| Message::FilesRefreshed(result),
-                            )
-                        ]);
+                        return Task::perform(
+                            async move { ImageDirectory::new(directory).scan(&filter) },
+                            move |result| Message::FilesRefreshedAfterRename(result, renamed),
+                        )
                     }
                     Err(err) => self.error_status = Some(GriphookError::OnRename(err)),
                 }
@@ -361,14 +358,30 @@ impl App {
         )
     }
 
+    /// Finds the file that is currently displayed in the preview area
+    /// in the list of files and sets the file selected for display to this file.
+    ///
+    /// If it is not found, `self.file.displayed` is set to `None`.
+    ///
+    /// With the optional `renamed`-parameter you can define a mapping
+    /// that shall be performed on the path of the currently displayed file.
     fn find_displayed_path_anew(&mut self, renamed: &Option<Vec<(PathBuf, PathBuf)>>) {
-        if let Some((old_displayed_file, _)) = &self.preview.preview {
+        if let Some((old_displayed_file, _)) = &mut self.preview.preview {
+            // If the currently displayed file is in the list of renames,
+            // set its name to the new name after rename.
             let new_displayed_file = if let Some(renamed) = renamed {
-                renamed.iter()
+                if let Some((_, new_displayed_file)) = renamed.iter()
                     .find(|(f, _)| f == old_displayed_file)
-                    .map(|(_, new_displayed_file)| new_displayed_file)
+                {
+                    // Set the name of the currently displayed file to the new one found
+                    // so we remember which file is opened.
+                    *old_displayed_file = new_displayed_file.clone();
+                    Some(new_displayed_file)
+                } else {
+                    None
+                }
             } else {
-                Some(old_displayed_file)
+                Some(& *old_displayed_file)
             };
 
             if let Some(new_displayed_file) = new_displayed_file {
@@ -387,6 +400,8 @@ impl App {
         }
     }
 
+    /// Check whether the currently loaded image is identical to the image selected
+    /// for display. If not, return a `Task` loading the selected image.
     fn _ensure_preview_loaded(&mut self) -> Option<Task<Message>> {
         let displayed = self.file.displayed?;
         let path = self.file.files[displayed].path.clone();
@@ -401,11 +416,13 @@ impl App {
         self.preview.status = Ok(Some("Loading preview…".to_string()));
         let path_cloned = path.clone();
         Some(Task::perform(
-            // TODO: Check if this might be the file already open.
             async move { preview::load(&path) },
             move |res| Message::PreviewLoaded(path_cloned, res),
         ))
     }
+    /// Wrapper around [`_ensure_preview_loaded`](App::_ensure_preview_loaded)
+    /// that returns an empty
+    /// `Task` instead of `None` if there is nothing to do.
     fn ensure_preview_loaded(&mut self) -> Task<Message> {
         self._ensure_preview_loaded()
             .unwrap_or_default()
