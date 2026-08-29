@@ -10,7 +10,7 @@ use regex::Regex;
 pub use rename::RenameOperation;
 
 /// The default regular expression for parsing image files
-pub const DEFAULT_PARSER: &str = r"^img_(?P<date>\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-\d+)?)_(?P<author>[\w\d-]*)_(?P<camera>[\w\d-]*)\.(?P<ext>ORF)$";
+pub const DEFAULT_PARSER: &str = r"^img_(?P<date>\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-\d+)?)_(?P<author>[\p{Alphabetic}\d\-]*)_(?P<camera>[\p{Alphabetic}\d\-]*)\.(?P<ext>ORF)$";
 /// The default replacement expression
 pub const DEFAULT_REPLACEMENT: &str = "img_${date}_${author}_${camera}_$name.${ext}";
 
@@ -51,8 +51,8 @@ impl ImageDirectory {
             if path.is_file() && ImageFile::is_supported(&path) {
                 if let Some(filename) = path.file_name().and_then(|name| name.to_str()) {
                     if filter.is_match(filename) {
-                        files.push(ImageFile { 
-                            path, 
+                        files.push(ImageFile {
+                            path,
                             selected: false
                         })
                     }
@@ -87,7 +87,7 @@ impl fmt::Display for FileError {
         match self {
             FileError::InvalidRegex(err) => write!(f, "Invalid regular expression: {}", err),
             FileError::ReadDirectory{ dir, err } => write!(
-                f, "Could not read directory {}: {}", 
+                f, "Could not read directory {}: {}",
                 dir.as_os_str().to_string_lossy(), err
             ),
         }
