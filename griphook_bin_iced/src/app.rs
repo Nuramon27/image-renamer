@@ -62,6 +62,12 @@ pub struct App {
     error_status: Option<GriphookError>
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrowKey {
+    Up,
+    Down
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     FilesLoaded(Result<Vec<ImageFile>, FileError>),
@@ -74,6 +80,7 @@ pub enum Message {
     Rename,
     Renamed(Result<Vec<(PathBuf, PathBuf)>, RenameError>),
     FileClicked(usize),
+    ArrowKey(i8),
     ModifiersChanged {
         ctrl: bool,
         shift: bool,
@@ -84,6 +91,17 @@ impl App {
     pub fn subscription(&self) -> Subscription<Message> {
         keyboard::listen()
             .filter_map(|event| match event {
+                keyboard::Event::KeyPressed { key, .. } => {
+                    match key {
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
+                            Some(Message::ArrowKey(1))
+                        },
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
+                            Some(Message::ArrowKey(-1))
+                        },
+                        _ => None,
+                    }
+                }
                 keyboard::Event::ModifiersChanged(modifiers) => {
                     Some(Message::ModifiersChanged { ctrl: modifiers.control(), shift: modifiers.shift() })
                 },
@@ -230,6 +248,18 @@ impl App {
                     return Self::load_preview(self.file.files[index].path.clone());
                 }
             },
+            Message::ArrowKey(direction) => {
+                if let Some(displayed) = &mut self.file.displayed {
+                    if direction < 0 {
+                        *displayed = displayed.saturating_sub(direction.abs() as usize)
+                    } else if direction > 0 {
+                        *displayed = cmp::min(
+                            displayed.saturating_add(direction.abs() as usize), self.file.files.len()-1
+                        );
+                    }
+                    return Self::load_preview(self.file.files[*displayed].path.clone());
+                }
+            }
             Message::ModifiersChanged{ ctrl, shift } => {
                 self.modifiers.ctrl = ctrl;
                 self.modifiers.shift = shift;
